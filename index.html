@@ -397,15 +397,25 @@
         if (m.roleId !== conflicted.roleId) return false;
         if (dayShifts.some(s => s.id !== shiftId && s.assignments.includes(m.id) &&
             rangesOverlap(shift.startTime, shift.endTime, s.startTime, s.endTime))) return false;
-        if ((st.appointments[m.id] || []).some(a => a.date === dateStr &&
+        const appts = st.appointments[m.id] || [];
+        if (appts.some(a => a.date === dateStr &&
             (a.allDay || rangesOverlap(shift.startTime, shift.endTime, a.startTime, a.endTime)))) return false;
+        // For midnight-spanning shifts also check swap candidate's next-day appointments
+        if (timeToMinutes(shift.endTime) <= timeToMinutes(shift.startTime)) {
+          const nd = new Date(dateStr + 'T12:00:00');
+          nd.setDate(nd.getDate() + 1);
+          const nextDs = isoDate(nd.getFullYear(), nd.getMonth(), nd.getDate());
+          if (appts.some(a => a.date === nextDs &&
+              (a.allDay || rangesOverlap('00:00', shift.endTime, a.startTime, a.endTime)))) return false;
+        }
         return true;
       });
     }
 
     // ── Render ────────────────────────────────────────────────────────
+    let _lastConflicts = [];
     function computeConflictDates() {
-      return new Set(detectConflicts(state).map(c => c.dateStr));
+      return new Set(_lastConflicts.map(c => c.dateStr));
     }
 
     function renderCoverageFooter() {
@@ -427,8 +437,9 @@
       const days = getDaysInMonth(viewYear, viewMonth);
       const firstDay = new Date(viewYear, viewMonth, 1).getDay();
       const today = new Date();
+      // use the already-computed conflicts from render() — no second detectConflicts call
       const conflictDates = computeConflictDates();
-      const allConflicts = detectConflicts(state);
+      const allConflicts = _lastConflicts;
       let cells = '';
       for (let i = 0; i < firstDay; i++) cells += `<div class="day-cell outside"></div>`;
       for (let d = 1; d <= days; d++) {
@@ -496,7 +507,8 @@
 
     function render() {
       const { viewYear, viewMonth } = state.settings;
-      const conflictCount = detectConflicts(state).length;
+      _lastConflicts = detectConflicts(state);
+      const conflictCount = _lastConflicts.length;
       document.getElementById('app').innerHTML = `
         <header class="app-header">
           <div class="print-header">Shift Calendar — ${MONTH_NAMES[viewMonth]} ${viewYear}</div>
@@ -990,6 +1002,7 @@
     function _saveAppt() {
       const { dateStr, memberId, startTime, endTime, allDay, note } = _am;
       if (!memberId || !note.trim()) return;
+      if (!allDay && startTime === endTime) { showBanner('Start and end time cannot be the same.', 'warn'); return; }
       if (!state.appointments[memberId]) state.appointments[memberId] = [];
       state.appointments[memberId].push({
         id: generateId(), date: dateStr,
@@ -1047,8 +1060,8 @@
       document.querySelectorAll('.ctx-menu').forEach(el => el.remove());
       const menu = document.createElement('div');
       menu.className = 'ctx-menu';
-      menu.style.top = event.clientY + 'px';
-      menu.style.left = event.clientX + 'px';
+      menu.style.top = Math.min(event.clientY, window.innerHeight - 145) + 'px';
+      menu.style.left = Math.min(event.clientX, window.innerWidth - 210) + 'px';
       const item1 = document.createElement('div');
       item1.className = 'ctx-item';
       item1.textContent = 'Copy shifts to next day';
@@ -1075,7 +1088,9 @@
       d.setDate(d.getDate() + daysAhead);
       const target = isoDate(d.getFullYear(), d.getMonth(), d.getDate());
       if (!state.schedule[target]) state.schedule[target] = [];
-      src.forEach(s => state.schedule[target].push({ ...s, id: generateId() }));
+      if (state.schedule[target]?.length && !confirm('Target day already has shifts. Append anyway?')) return;
+      if (!state.schedule[target]) state.schedule[target] = [];
+      src.forEach(s => state.schedule[target].push({ ...s, id: generateId(), assignments: [...s.assignments] }));
       saveState(); render();
     }
 
@@ -1104,7 +1119,7 @@
           if (d.getFullYear() !== viewYear || d.getMonth() !== viewMonth) continue;
           const ds = isoDate(d.getFullYear(), d.getMonth(), d.getDate());
           if (!state.schedule[ds]) state.schedule[ds] = [];
-          src.forEach(s => state.schedule[ds].push({ ...s, id: generateId() }));
+          src.forEach(s => state.schedule[ds].push({ ...s, id: generateId(), assignments: [...s.assignments] }));
           changed = true;
         }
       }
@@ -1161,9 +1176,10 @@
     }
 
     function deleteRole(id) {
-      if (state.members.some(m => m.roleId === id) &&
-          !confirm('Members are assigned to this role. Delete role anyway?')) return;
+      const affected = state.members.filter(m => m.roleId === id);
+      if (affected.length && !confirm(`${affected.length} member(s) use this role and will have no role assigned. Delete anyway?`)) return;
       state.roles = state.roles.filter(r => r.id !== id);
+      affected.forEach(m => { m.roleId = ''; });
       saveState(); openSettings('roles');
     }
 
@@ -1179,7 +1195,7 @@
             <span style="color:var(--text-muted);font-size:12px;">${escapeHtml(role?.name||'—')}</span>
           </span>
           <input type="color" class="color-swatch" value="${m.color}" style="background:${m.color}"
-            oninput="updateMemberColor('${m.id}',this.value)">
+            onchange="updateMemberColor('${m.id}',this.value)">
           <button class="btn btn-danger" onclick="deleteMember('${m.id}')">✕</button>
         </div>`;
       }).join('');
@@ -1268,7 +1284,7 @@
 
     // ── Keyboard shortcuts ────────────────────────────────────────────
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') { closeModal(); }
+      if (e.key === 'Escape') { if (_tourStep >= 0) endTour(); closeModal(); }
       const modalOpen = document.getElementById('modal-overlay')?.children.length > 0;
       if (!modalOpen) {
         if (e.key === 'ArrowLeft') prevMonth();

@@ -252,7 +252,6 @@
         const dateStr = isoDate(viewYear, viewMonth, d);
         const isToday = today.getFullYear()===viewYear && today.getMonth()===viewMonth && today.getDate()===d;
         const hasConflict = conflictDates.has(dateStr);
-        const clickFn = state._apptMode ? `openApptModal('${dateStr}')` : `openDayModal('${dateStr}')`;
         const content = state._apptMode
           ? renderApptDayContent(dateStr, allConflicts)
           : renderDayShifts(dateStr);

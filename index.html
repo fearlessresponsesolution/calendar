@@ -137,6 +137,15 @@
     .ctx-item { padding: 9px 14px; cursor: pointer; font-size: 13px; }
     .ctx-item:hover { background: var(--surface); }
 
+    /* Appointment view */
+    .appt-entry { border-radius: 3px; padding: 3px 5px; margin-bottom: 2px; font-size: 11px;
+      background: var(--surface2); border-left: 3px solid var(--text-muted); }
+    .appt-entry.conflict { border-left-color: var(--danger); background: rgba(239,68,68,0.08); }
+    .appt-member-label { display: flex; align-items: center; gap: 4px; font-weight: 600; }
+    .appt-note { color: var(--text-muted); font-size: 10px; margin-top: 1px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .appt-note.conflict-note { color: var(--danger); }
+
     /* Print-only header */
     .print-header { display: none; }
     @media print {
@@ -369,7 +378,27 @@
         </div>`;
       }).join('');
     }
-    function renderApptDayContent(dateStr, allConflicts) { return ''; }  // filled in Task 8
+    function renderApptDayContent(dateStr, allConflicts) {
+      const conflictKeys = new Set(
+        allConflicts.filter(c => c.dateStr === dateStr).map(c => `${c.memberId}:${c.apptId}`)
+      );
+      const entries = [];
+      state.members.forEach(m => {
+        (state.appointments[m.id] || []).filter(a => a.date === dateStr).forEach(a => {
+          entries.push({ m, a, isConflict: conflictKeys.has(`${m.id}:${a.id}`) });
+        });
+      });
+      if (!entries.length) return '<span style="color:var(--text-muted);font-size:10px;">—</span>';
+      return entries.map(({ m, a, isConflict }) => {
+        const timeStr = a.allDay ? 'All day' : `${formatTime(a.startTime)}–${formatTime(a.endTime)}`;
+        return `<div class="appt-entry${isConflict?' conflict':''}">
+          <div class="appt-member-label">
+            <span class="member-dot" style="background:${m.color}"></span>${escapeHtml(m.name.split(' ')[0])}
+          </div>
+          <div class="appt-note${isConflict?' conflict-note':''}">${escapeHtml(a.note)} · ${timeStr}${isConflict?' ⚠':''}</div>
+        </div>`;
+      }).join('');
+    }
 
     function render() {
       const { viewYear, viewMonth } = state.settings;
@@ -426,7 +455,10 @@
 
     // ── Stubs (replaced in later tasks) ──────────────────────────────
     let _conflictsPanelOpen = false;
-    function toggleApptMode() {}
+    function toggleApptMode() {
+      state._apptMode = !state._apptMode;
+      render();
+    }
     function toggleConflictsPanel() {}
     let _dm = null;  // day modal transient state
 
@@ -562,7 +594,84 @@
       _dm.adding = false; _dm.editId = null; _dm.assignments = [];
       _renderDayModal(); render();
     }
-    function openApptModal(dateStr) {}
+    let _am = null;  // appointment modal transient state
+
+    function openApptModal(dateStr) {
+      _am = { dateStr, memberId: state.members[0]?.id||'', startTime:'09:00', endTime:'10:00', allDay:false, note:'' };
+      _renderApptModal();
+    }
+
+    function _renderApptModal() {
+      const { dateStr, memberId, startTime, endTime, allDay, note } = _am;
+      const dateLabel = new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US',
+        { weekday:'long', month:'long', day:'numeric' });
+
+      const existing = state.members.flatMap(m =>
+        (state.appointments[m.id]||[]).filter(a=>a.date===dateStr).map(a=>({m,a})));
+      const existingRows = existing.map(({m,a}) => `
+        <div class="shift-edit-row">
+          <span class="member-dot" style="background:${m.color}"></span>
+          <div class="shift-edit-info">
+            <div class="shift-edit-time">${escapeHtml(m.name)}</div>
+            <div class="shift-edit-sub">${escapeHtml(a.note)} · ${a.allDay?'All day':formatTime(a.startTime)+'–'+formatTime(a.endTime)}</div>
+          </div>
+          <button class="btn btn-danger" onclick="_removeAppt('${m.id}','${a.id}')">✕</button>
+        </div>`).join('');
+
+      const memberOpts = state.members.map(m =>
+        `<option value="${m.id}"${memberId===m.id?' selected':''}>${escapeHtml(m.name)}</option>`).join('');
+
+      document.getElementById('modal-overlay').innerHTML = `
+        <div class="modal modal-lg">
+          <div class="modal-header">
+            <h2>📅 ${dateLabel}</h2>
+            <button class="modal-close" onclick="closeModal()">✕</button>
+          </div>
+          <div class="modal-body">
+            ${existingRows}
+            <div class="${existing.length?'form-divider':''}">
+              <div class="section-label">Add Appointment / Alibi</div>
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <select class="tmpl-select" onchange="_am.memberId=this.value">${memberOpts}</select>
+                <input placeholder="Note — e.g. Doctor appointment, PTO, Training"
+                  value="${escapeHtml(note)}" style="background:var(--surface);border:1px solid var(--border);
+                  border-radius:var(--radius);color:var(--text);padding:6px 8px;font-size:13px;"
+                  oninput="_am.note=this.value">
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                  <input type="checkbox" ${allDay?'checked':''}
+                    onchange="_am.allDay=this.checked;_renderApptModal()"
+                    style="width:15px;height:15px;accent-color:var(--accent);">
+                  All day
+                </label>
+                ${!allDay ? `<div class="time-row">
+                  <label>Start <input type="time" value="${startTime}"
+                    onchange="_am.startTime=this.value"></label>
+                  <label>End <input type="time" value="${endTime}"
+                    onchange="_am.endTime=this.value"></label>
+                </div>` : ''}
+                <button class="btn btn-primary" onclick="_saveAppt()">Add Appointment</button>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function _removeAppt(memberId, apptId) {
+      state.appointments[memberId] = (state.appointments[memberId]||[]).filter(a=>a.id!==apptId);
+      saveState(); _renderApptModal(); render();
+    }
+
+    function _saveAppt() {
+      const { dateStr, memberId, startTime, endTime, allDay, note } = _am;
+      if (!memberId || !note.trim()) return;
+      if (!state.appointments[memberId]) state.appointments[memberId] = [];
+      state.appointments[memberId].push({
+        id: generateId(), date: dateStr,
+        startTime: allDay?'':startTime, endTime: allDay?'':endTime,
+        allDay, note: note.trim()
+      });
+      saveState(); _renderApptModal(); render();
+    }
     function openMemberSchedule(memberId) {}
     function renderConflictsPanel() {}
     function openCopyMenu(event, dateStr) {

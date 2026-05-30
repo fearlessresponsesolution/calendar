@@ -312,7 +312,31 @@
       return cells;
     }
 
-    function renderDayShifts(dateStr) { return ''; }        // filled in Task 6
+    function renderDayShifts(dateStr) {
+      const shifts = (state.schedule[dateStr] || [])
+        .slice().sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+      return shifts.map(shift => {
+        const unassigned = shift.assignments.length === 0;
+        const tmplName = shift.templateId
+          ? (state.shiftTemplates.find(t => t.id === shift.templateId)?.name || 'Custom') : 'Custom';
+        const firstMember = !unassigned ? state.members.find(m => m.id === shift.assignments[0]) : null;
+        const bgColor = firstMember ? firstMember.color + 'cc' : 'var(--surface2)';
+        const chips = shift.assignments.map(mid => {
+          const m = state.members.find(m => m.id === mid);
+          if (!m) return '';
+          return `<span class="member-chip" data-member-id="${m.id}" title="${m.name}">
+            <span class="member-dot" style="background:${m.color}"></span>${m.name.split(' ')[0]}
+          </span>`;
+        }).join('');
+        return `<div class="shift-bar${unassigned?' unassigned':''}"
+            style="${unassigned?'':'background:'+bgColor}" title="${tmplName}">
+          <div class="shift-time">${formatTime(shift.startTime)}–${formatTime(shift.endTime)}</div>
+          ${unassigned
+            ? '<div style="font-size:10px;">Unassigned</div>'
+            : `<div class="shift-members">${chips}</div>`}
+        </div>`;
+      }).join('');
+    }
     function renderApptDayContent(dateStr, allConflicts) { return ''; }  // filled in Task 8
 
     function render() {
@@ -549,8 +573,16 @@
       state._apptMode = false;  // transient UI flag, never persisted
       render();
       document.getElementById('app').addEventListener('click', e => {
+        // Member chip click → open member schedule
+        const chip = e.target.closest('.member-chip');
+        if (chip) {
+          e.stopPropagation();
+          openMemberSchedule(chip.dataset.memberId);
+          return;
+        }
+        // Day cell click → open day/appointment modal
         const cell = e.target.closest('.day-cell:not(.outside)');
-        if (cell && !e.target.closest('.member-chip') && !e.target.closest('.shift-bar button')) {
+        if (cell && !e.target.closest('.shift-bar button')) {
           const dateStr = cell.dataset.date;
           if (dateStr) {
             if (state._apptMode) openApptModal(dateStr);

@@ -109,6 +109,34 @@
     .member-chip:hover { background: rgba(255,255,255,0.15); }
     .member-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
+    /* Day editor */
+    .shift-edit-row { display: flex; align-items: center; gap: 8px; background: var(--surface);
+      border-radius: var(--radius); padding: 8px 10px; margin-bottom: 6px; }
+    .shift-edit-info { flex: 1; }
+    .shift-edit-time { font-weight: 600; font-size: 13px; }
+    .shift-edit-sub { color: var(--text-muted); font-size: 12px; }
+    .time-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+    .time-row label { font-size: 13px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+    .time-row input[type=time] { background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--text); padding: 5px 8px; font-size: 13px; }
+    .role-group { margin-bottom: 8px; }
+    .role-group-label { font-size: 11px; color: var(--accent); font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+    .member-check { display: flex; align-items: center; gap: 8px; padding: 5px 6px;
+      border-radius: 4px; font-size: 13px; cursor: pointer; }
+    .member-check:hover { background: var(--surface); }
+    .member-check.busy { opacity: 0.4; pointer-events: none; }
+    .member-check input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+    .form-divider { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 8px; }
+    .tmpl-select { width: 100%; background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--text); padding: 6px 8px; font-size: 13px; margin-bottom: 10px; }
+    /* Context menu */
+    .ctx-menu { position: fixed; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius); z-index: 200; min-width: 180px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5); overflow: hidden; }
+    .ctx-item { padding: 9px 14px; cursor: pointer; font-size: 13px; }
+    .ctx-item:hover { background: var(--surface); }
+
     /* Print-only header */
     .print-header { display: none; }
     @media print {
@@ -400,11 +428,174 @@
     let _conflictsPanelOpen = false;
     function toggleApptMode() {}
     function toggleConflictsPanel() {}
-    function openDayModal(dateStr) {}
+    let _dm = null;  // day modal transient state
+
+    function openDayModal(dateStr) {
+      if (state._apptMode) { openApptModal(dateStr); return; }
+      _dm = { dateStr, adding: false, editId: null, templateId: '', startTime: '06:00', endTime: '14:00', assignments: [] };
+      _renderDayModal();
+    }
+
+    function _renderDayModal() {
+      const { dateStr } = _dm;
+      const dateLabel = new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US',
+        { weekday:'long', month:'long', day:'numeric', year:'numeric' });
+      const shifts = (state.schedule[dateStr] || [])
+        .slice().sort((a,b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+
+      const existingRows = shifts.map(s => {
+        const names = s.assignments.map(id => state.members.find(m=>m.id===id)?.name.split(' ')[0]).filter(Boolean).join(', ') || 'Unassigned';
+        const tmpl = s.templateId ? (state.shiftTemplates.find(t=>t.id===s.templateId)?.name||'Custom') : 'Custom';
+        return `<div class="shift-edit-row">
+          <div class="shift-edit-info">
+            <div class="shift-edit-time">${formatTime(s.startTime)}–${formatTime(s.endTime)}</div>
+            <div class="shift-edit-sub">${escapeHtml(tmpl)} · ${escapeHtml(names)}</div>
+          </div>
+          <button class="btn" onclick="_editShift('${s.id}')">Edit</button>
+          <button class="btn btn-danger" onclick="_removeShift('${s.id}')">✕</button>
+        </div>`;
+      }).join('');
+
+      const formHtml = (_dm.adding || _dm.editId) ? _renderShiftForm() :
+        `<button class="btn btn-primary" onclick="_dm.adding=true;_renderDayModal()">+ Add Shift</button>`;
+
+      document.getElementById('modal-overlay').innerHTML = `
+        <div class="modal modal-lg">
+          <div class="modal-header">
+            <h2>${dateLabel}</h2>
+            <button class="modal-close" onclick="closeModal()">✕</button>
+          </div>
+          <div class="modal-body">
+            ${existingRows || '<p class="empty-hint" style="margin-bottom:12px;">No shifts scheduled.</p>'}
+            ${formHtml}
+          </div>
+        </div>`;
+    }
+
+    function _renderShiftForm() {
+      const { templateId, startTime, endTime, assignments } = _dm;
+      const tmplOpts = `<option value="">— Custom times —</option>` +
+        state.shiftTemplates.map(t =>
+          `<option value="${t.id}"${templateId===t.id?' selected':''}>${escapeHtml(t.name)} (${formatTime(t.startTime)}–${formatTime(t.endTime)})</option>`
+        ).join('');
+
+      const memberGroups = state.roles.map(role => {
+        const roleMembers = state.members.filter(m => m.roleId === role.id);
+        if (!roleMembers.length) return '';
+        const checks = roleMembers.map(m => {
+          const busy = (state.schedule[_dm.dateStr] || []).some(s =>
+            s.id !== _dm.editId && s.assignments.includes(m.id) &&
+            rangesOverlap(startTime, endTime, s.startTime, s.endTime));
+          const checked = assignments.includes(m.id);
+          return `<label class="member-check${busy?' busy':''}">
+            <input type="checkbox" ${checked?'checked':''} ${busy?'disabled':''}
+              onchange="_toggleMember('${m.id}',this.checked)">
+            <span class="member-dot" style="background:${m.color}"></span>
+            ${escapeHtml(m.name)}${busy?' <span style="color:var(--text-muted);font-size:11px;">(busy)</span>':''}
+          </label>`;
+        }).join('');
+        return `<div class="role-group">
+          <div class="role-group-label">${escapeHtml(role.name)}</div>
+          ${checks}
+        </div>`;
+      }).join('');
+
+      return `<div class="form-divider">
+        <div class="section-label">${_dm.editId?'Edit Shift':'New Shift'}</div>
+        <div class="section-label" style="margin-top:8px;">Template</div>
+        <select class="tmpl-select" onchange="_pickTemplate(this.value)">${tmplOpts}</select>
+        <div class="time-row">
+          <label>Start <input type="time" value="${startTime}"
+            onchange="_dm.startTime=this.value;_renderDayModal()"></label>
+          <label>End <input type="time" value="${endTime}"
+            onchange="_dm.endTime=this.value;_renderDayModal()"></label>
+        </div>
+        <div class="section-label">Assign Members</div>
+        ${memberGroups || '<p class="empty-hint">No members — add them in ⚙ Settings.</p>'}
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button class="btn btn-primary" onclick="_saveShift()">
+            ${_dm.editId?'Update Shift':'Save Shift'}
+          </button>
+          <button class="btn" onclick="_dm.adding=false;_dm.editId=null;_renderDayModal()">Cancel</button>
+        </div>
+      </div>`;
+    }
+
+    function _pickTemplate(tid) {
+      _dm.templateId = tid;
+      const t = state.shiftTemplates.find(t => t.id === tid);
+      if (t) { _dm.startTime = t.startTime; _dm.endTime = t.endTime; }
+      _renderDayModal();
+    }
+
+    function _toggleMember(mid, checked) {
+      if (checked) { if (!_dm.assignments.includes(mid)) _dm.assignments.push(mid); }
+      else { _dm.assignments = _dm.assignments.filter(id => id !== mid); }
+    }
+
+    function _editShift(shiftId) {
+      const s = (state.schedule[_dm.dateStr] || []).find(s => s.id === shiftId);
+      if (!s) return;
+      _dm.editId = shiftId; _dm.adding = false;
+      _dm.templateId = s.templateId || ''; _dm.startTime = s.startTime;
+      _dm.endTime = s.endTime; _dm.assignments = [...s.assignments];
+      _renderDayModal();
+    }
+
+    function _removeShift(shiftId) {
+      if (!confirm('Remove this shift?')) return;
+      state.schedule[_dm.dateStr] = (state.schedule[_dm.dateStr] || []).filter(s => s.id !== shiftId);
+      saveState(); _renderDayModal(); render();
+    }
+
+    function _saveShift() {
+      const { dateStr, editId, templateId, startTime, endTime, assignments } = _dm;
+      if (!startTime || !endTime) return;
+      if (!state.schedule[dateStr]) state.schedule[dateStr] = [];
+      if (editId) {
+        const s = state.schedule[dateStr].find(s => s.id === editId);
+        if (s) Object.assign(s, { templateId: templateId||null, startTime, endTime, assignments, isAdHoc: !templateId });
+      } else {
+        state.schedule[dateStr].push({ id: generateId(), templateId: templateId||null, startTime, endTime, assignments, isAdHoc: !templateId });
+      }
+      saveState();
+      _dm.adding = false; _dm.editId = null; _dm.assignments = [];
+      _renderDayModal(); render();
+    }
     function openApptModal(dateStr) {}
     function openMemberSchedule(memberId) {}
     function renderConflictsPanel() {}
-    function openCopyMenu(event, dateStr) { event.preventDefault(); }
+    function openCopyMenu(event, dateStr) {
+      event.preventDefault();
+      document.querySelectorAll('.ctx-menu').forEach(el => el.remove());
+      const menu = document.createElement('div');
+      menu.className = 'ctx-menu';
+      menu.style.top = event.clientY + 'px';
+      menu.style.left = event.clientX + 'px';
+      const item1 = document.createElement('div');
+      item1.className = 'ctx-item';
+      item1.textContent = 'Copy shifts to next day';
+      item1.onclick = () => { _copyShifts(dateStr, 1); menu.remove(); };
+      const item2 = document.createElement('div');
+      item2.className = 'ctx-item';
+      item2.textContent = 'Copy shifts to next week';
+      item2.onclick = () => { _copyShifts(dateStr, 7); menu.remove(); };
+      menu.appendChild(item1);
+      menu.appendChild(item2);
+      document.body.appendChild(menu);
+      setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 0);
+    }
+
+    function _copyShifts(dateStr, daysAhead) {
+      const src = state.schedule[dateStr];
+      if (!src || !src.length) return;
+      const d = new Date(dateStr + 'T12:00:00');
+      d.setDate(d.getDate() + daysAhead);
+      const target = isoDate(d.getFullYear(), d.getMonth(), d.getDate());
+      if (!state.schedule[target]) state.schedule[target] = [];
+      src.forEach(s => state.schedule[target].push({ ...s, id: generateId() }));
+      saveState(); render();
+    }
 
     // ── Settings Modal ────────────────────────────────────────────
     let _settingsTab = 'roles';

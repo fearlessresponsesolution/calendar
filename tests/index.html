@@ -98,6 +98,7 @@
     const dayShifts = st.schedule[dateStr] || [];
     return st.members.filter(m => {
       if (m.id === conflictedMemberId) return false;
+      if (shift.assignments.includes(m.id)) return false;
       if (m.roleId !== conflicted.roleId) return false;
       if (dayShifts.some(s => s.id !== shiftId && s.assignments.includes(m.id) &&
           rangesOverlap(shift.startTime, shift.endTime, s.startTime, s.endTime))) return false;
@@ -244,6 +245,20 @@
         { id:'s1', startTime:'06:00', endTime:'14:00', assignments:['m1'], templateId:null, isAdHoc:false },
         { id:'s2', startTime:'08:00', endTime:'16:00', assignments:['m2'], templateId:null, isAdHoc:false }
       ]},
+      appointments:{},
+      settings:{ viewYear:2026, viewMonth:5 }
+    };
+    assertEqual(getAvailableSwaps(s, '2026-06-01', 's1', 'm1').length, 0);
+  });
+
+  test('getAvailableSwaps: excludes member already assigned to the same shift', () => {
+    const s = {
+      members:[
+        { id:'m1', roleId:'r1', name:'Alice', color:'#3b82f6' },
+        { id:'m2', roleId:'r1', name:'Bob', color:'#10b981' }
+      ],
+      roles:[{ id:'r1', name:'Nurse' }], shiftTemplates:[],
+      schedule:{ '2026-06-01':[{ id:'s1', startTime:'06:00', endTime:'14:00', assignments:['m1','m2'], templateId:null, isAdHoc:false }] },
       appointments:{},
       settings:{ viewYear:2026, viewMonth:5 }
     };

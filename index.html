@@ -331,6 +331,7 @@
       const dayShifts = st.schedule[dateStr] || [];
       return st.members.filter(m => {
         if (m.id === conflictedMemberId) return false;
+        if (shift.assignments.includes(m.id)) return false;
         if (m.roleId !== conflicted.roleId) return false;
         if (dayShifts.some(s => s.id !== shiftId && s.assignments.includes(m.id) &&
             rangesOverlap(shift.startTime, shift.endTime, s.startTime, s.endTime))) return false;

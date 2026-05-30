@@ -61,6 +61,54 @@
       font-size: 12px; color: var(--text-muted); flex-shrink: 0; display: flex; gap: 16px; flex-wrap: wrap; }
     .cov-item .ok { color: var(--success); } .cov-item .warn { color: var(--warn); }
 
+    /* Modals */
+    #modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+      z-index: 100; display: flex; align-items: center; justify-content: center; }
+    #modal-overlay:empty { display: none; }
+    .modal { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
+      width: min(540px, 95vw); max-height: 85vh; display: flex; flex-direction: column; }
+    .modal-lg { width: min(640px, 95vw); }
+    .modal-header { padding: 14px 16px; border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+    .modal-header h2 { font-size: 15px; }
+    .modal-close { background: none; border: none; color: var(--text-muted);
+      cursor: pointer; font-size: 20px; line-height: 1; padding: 0 4px; }
+    .modal-close:hover { color: var(--text); }
+    .modal-body { padding: 16px; overflow-y: auto; flex: 1; }
+    .tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+    .tab { padding: 8px 14px; cursor: pointer; font-size: 13px; color: var(--text-muted);
+      border-bottom: 2px solid transparent; margin-bottom: -1px; background: none;
+      border-top: none; border-left: none; border-right: none; }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .item-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+    .item-row { display: flex; align-items: center; gap: 8px; background: var(--surface);
+      border-radius: var(--radius); padding: 8px 10px; }
+    .item-row .row-name { flex: 1; font-size: 13px; }
+    .color-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+    .add-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .add-form input, .add-form select {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      color: var(--text); padding: 5px 8px; font-size: 13px; }
+    .add-form input { flex: 1; min-width: 120px; }
+    .color-swatch { width: 28px; height: 28px; border-radius: var(--radius);
+      border: 1px solid var(--border); cursor: pointer; padding: 2px; }
+    .section-label { font-size: 11px; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.05em; margin: 12px 0 6px; }
+    .empty-hint { color: var(--text-muted); font-size: 13px; padding: 4px 0; }
+
+    /* Shift bars */
+    .shift-bar { border-radius: 3px; padding: 3px 5px; margin-bottom: 2px; font-size: 11px;
+      color: #fff; cursor: default; position: relative;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .shift-bar.unassigned { background: transparent !important; border: 1px dashed var(--warn);
+      color: var(--warn); }
+    .shift-time { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .shift-members { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
+    .member-chip { display: inline-flex; align-items: center; gap: 2px; font-size: 10px;
+      white-space: nowrap; cursor: pointer; border-radius: 3px; padding: 0 2px; }
+    .member-chip:hover { background: rgba(255,255,255,0.15); }
+    .member-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
     /* Print-only header */
     .print-header { display: none; }
     @media print {
@@ -324,12 +372,125 @@
     let _conflictsPanelOpen = false;
     function toggleApptMode() {}
     function toggleConflictsPanel() {}
-    function openSettings(tab) {}
     function openDayModal(dateStr) {}
     function openApptModal(dateStr) {}
     function openMemberSchedule(memberId) {}
     function renderConflictsPanel() {}
     function openCopyMenu(event, dateStr) { event.preventDefault(); }
+
+    // ── Settings Modal ────────────────────────────────────────────
+    let _settingsTab = 'roles';
+
+    function openSettings(tab) {
+      if (tab) _settingsTab = tab;
+      if (!state.roles.length && _settingsTab !== 'roles') _settingsTab = 'roles';
+      document.getElementById('modal-overlay').innerHTML = `
+        <div class="modal">
+          <div class="modal-header">
+            <h2>⚙ Settings</h2>
+            <button class="modal-close" onclick="closeModal()">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="tabs">
+              <button class="tab${_settingsTab==='roles'?' active':''}" onclick="openSettings('roles')">Roles</button>
+              <button class="tab${_settingsTab==='members'?' active':''}" onclick="openSettings('members')">Members</button>
+              <button class="tab${_settingsTab==='templates'?' active':''}" onclick="openSettings('templates')">Shift Templates</button>
+            </div>
+            ${_settingsTab==='roles' ? renderRolesTab() : ''}
+            ${_settingsTab==='members' ? renderMembersTab() : ''}
+            ${_settingsTab==='templates' ? renderTemplatesTab() : ''}
+          </div>
+        </div>`;
+    }
+
+    // ── Roles tab ─────────────────────────────────────────────────────
+    function renderRolesTab() {
+      const rows = state.roles.map(r => `
+        <div class="item-row">
+          <span class="row-name">${r.name}</span>
+          <button class="btn btn-danger" onclick="deleteRole('${r.id}')">Delete</button>
+        </div>`).join('');
+      return `
+        <div class="item-list">${rows||'<p class="empty-hint">No roles yet. Add one below.</p>'}</div>
+        <div class="add-form">
+          <input id="new-role-name" placeholder="Role name (e.g. Nurse)"
+            onkeydown="if(event.key==='Enter')addRole()">
+          <button class="btn btn-primary" onclick="addRole()">Add Role</button>
+        </div>`;
+    }
+
+    function addRole() {
+      const el = document.getElementById('new-role-name');
+      const name = el.value.trim();
+      if (!name) return;
+      state.roles.push({ id: generateId(), name });
+      saveState(); openSettings('roles');
+    }
+
+    function deleteRole(id) {
+      if (state.members.some(m => m.roleId === id) &&
+          !confirm('Members are assigned to this role. Delete role anyway?')) return;
+      state.roles = state.roles.filter(r => r.id !== id);
+      saveState(); openSettings('roles');
+    }
+
+    // ── Members tab ───────────────────────────────────────────────────
+    function renderMembersTab() {
+      if (!state.roles.length) return `<p style="color:var(--warn);font-size:13px;">
+        Create at least one Role first (Roles tab), then add members.</p>`;
+      const rows = state.members.map(m => {
+        const role = state.roles.find(r => r.id === m.roleId);
+        return `<div class="item-row">
+          <span class="color-dot" style="background:${m.color}"></span>
+          <span class="row-name">${m.name}
+            <span style="color:var(--text-muted);font-size:12px;">${role?.name||'—'}</span>
+          </span>
+          <input type="color" class="color-swatch" value="${m.color}" style="background:${m.color}"
+            oninput="updateMemberColor('${m.id}',this.value)">
+          <button class="btn btn-danger" onclick="deleteMember('${m.id}')">✕</button>
+        </div>`;
+      }).join('');
+      const roleOpts = state.roles.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+      return `
+        <div class="item-list">${rows||'<p class="empty-hint">No members yet.</p>'}</div>
+        <div class="add-form">
+          <input id="new-member-name" placeholder="Full name"
+            onkeydown="if(event.key==='Enter')addMember()">
+          <select id="new-member-role">${roleOpts}</select>
+          <button class="btn btn-primary" onclick="addMember()">Add Member</button>
+        </div>`;
+    }
+
+    function addMember() {
+      const nameEl = document.getElementById('new-member-name');
+      const roleEl = document.getElementById('new-member-role');
+      const name = nameEl.value.trim();
+      const roleId = roleEl?.value;
+      if (!name || !roleId) return;
+      state.members.push({ id: generateId(), name, roleId, color: getNextColor(state.members) });
+      saveState(); openSettings('members');
+    }
+
+    function updateMemberColor(id, color) {
+      const m = state.members.find(m => m.id === id);
+      if (m) { m.color = color; saveState(); openSettings('members'); }
+    }
+
+    function deleteMember(id) {
+      const inShifts = Object.values(state.schedule).some(shifts =>
+        shifts.some(s => s.assignments.includes(id)));
+      if (inShifts && !confirm('Member has assigned shifts. Delete anyway?')) return;
+      state.members = state.members.filter(m => m.id !== id);
+      Object.values(state.schedule).forEach(shifts =>
+        shifts.forEach(s => { s.assignments = s.assignments.filter(a => a !== id); }));
+      delete state.appointments[id];
+      saveState(); openSettings('members'); render();
+    }
+
+    // ── Templates tab stub (replaced in Task 5) ───────────────────────
+    function renderTemplatesTab() {
+      return '<p class="empty-hint">Shift Templates — coming in next step.</p>';
+    }
 
     // ── Modal helpers ─────────────────────────────────────────────────
     function closeModal() {

@@ -14,6 +14,69 @@
       --success: #10b981; --radius: 6px; --gap: 4px;
     }
     body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; min-height: 100vh; }
+
+    /* Layout */
+    #app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    .app-header { display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+      background: var(--surface2); border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
+    .app-header h1 { font-size: 16px; font-weight: 700; margin-right: auto; }
+    .btn { padding: 5px 12px; border-radius: var(--radius); border: 1px solid var(--border);
+      background: var(--surface); color: var(--text); cursor: pointer; font-size: 13px; white-space: nowrap; }
+    .btn:hover { background: var(--border); }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-active { background: var(--warn); border-color: var(--warn); color: #111; }
+    .btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+    .badge { display: inline-flex; align-items: center; justify-content: center;
+      background: var(--danger); color: #fff; border-radius: 10px;
+      font-size: 11px; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 4px; }
+    .month-nav { display: flex; align-items: center; gap: 6px; }
+    .month-nav .month-label { font-weight: 600; min-width: 140px; text-align: center; }
+    .nav-btn { background: none; border: 1px solid var(--border); color: var(--text);
+      border-radius: var(--radius); width: 28px; height: 28px; cursor: pointer;
+      font-size: 16px; display: flex; align-items: center; justify-content: center; }
+    .nav-btn:hover { background: var(--border); }
+
+    /* Calendar body */
+    .calendar-wrap { display: flex; flex: 1; overflow: hidden; }
+    .calendar-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+    .day-headers { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--gap);
+      padding: 4px 8px; flex-shrink: 0; }
+    .day-header { text-align: center; font-size: 11px; color: var(--text-muted);
+      font-weight: 600; padding: 4px 0; }
+    .calendar-grid { flex: 1; overflow-y: auto; padding: 8px; }
+    .days-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--gap); }
+    .day-cell { background: var(--surface); border-radius: var(--radius); padding: 5px;
+      min-height: 90px; cursor: pointer; border: 1px solid transparent; transition: border-color 0.1s; position: relative; }
+    .day-cell:hover { border-color: var(--border); }
+    .day-cell.outside { background: transparent; cursor: default; opacity: 0; pointer-events: none; }
+    .day-cell.today { border-color: var(--accent) !important; }
+    .day-number { font-size: 12px; font-weight: 600; color: var(--text);
+      margin-bottom: 4px; display: flex; align-items: center; gap: 4px; }
+    .conflict-badge { background: var(--danger); color: #fff; border-radius: 8px;
+      font-size: 9px; padding: 1px 4px; }
+
+    /* Coverage footer */
+    .coverage-footer { padding: 6px 16px; background: var(--surface2); border-top: 1px solid var(--border);
+      font-size: 12px; color: var(--text-muted); flex-shrink: 0; display: flex; gap: 16px; flex-wrap: wrap; }
+    .cov-item .ok { color: var(--success); } .cov-item .warn { color: var(--warn); }
+
+    /* Print-only header */
+    .print-header { display: none; }
+    @media print {
+      .print-header { display: block; font-size: 20px; font-weight: 700; margin-bottom: 8px; color: #000; }
+      .app-header .btn, .app-header .nav-btn, #conflicts-panel,
+      #modal-overlay, #app-banner { display: none !important; }
+      .app-header { border-bottom: 1px solid #ccc; }
+      .month-label { color: #000 !important; }
+      #app { height: auto; }
+      .calendar-wrap { display: block; }
+      .calendar-grid { overflow: visible; }
+      .day-cell { break-inside: avoid; border: 1px solid #ddd !important;
+        min-height: 80px; background: #fff !important; }
+      .day-number { color: #000 !important; }
+      .coverage-footer { display: flex; color: #555; }
+    }
   </style>
 </head>
 <body>
@@ -157,11 +220,133 @@
       });
     }
 
-    // ── Render stub ───────────────────────────────────────────────────
-    function render() {
-      document.getElementById('app').innerHTML =
-        '<p style="padding:20px;color:#94a3b8">Loading…</p>';
+    // ── Render ────────────────────────────────────────────────────────
+    function computeConflictDates() {
+      return new Set(detectConflicts(state).map(c => c.dateStr));
     }
+
+    function renderCoverageFooter() {
+      const { viewYear, viewMonth } = state.settings;
+      const days = getDaysInMonth(viewYear, viewMonth);
+      if (!state.shiftTemplates.length) return '<span>Add shift templates in ⚙ Settings to track coverage.</span>';
+      return state.shiftTemplates.map(t => {
+        let covered = 0;
+        for (let d = 1; d <= days; d++) {
+          const ds = isoDate(viewYear, viewMonth, d);
+          if ((state.schedule[ds] || []).some(s => s.templateId === t.id && s.assignments.length > 0)) covered++;
+        }
+        return `<span class="cov-item">${t.name}: <span class="${covered===days?'ok':'warn'}">${covered}/${days}</span></span>`;
+      }).join('');
+    }
+
+    function renderCalendarGrid() {
+      const { viewYear, viewMonth } = state.settings;
+      const days = getDaysInMonth(viewYear, viewMonth);
+      const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+      const today = new Date();
+      const conflictDates = computeConflictDates();
+      const allConflicts = detectConflicts(state);
+      let cells = '';
+      for (let i = 0; i < firstDay; i++) cells += `<div class="day-cell outside"></div>`;
+      for (let d = 1; d <= days; d++) {
+        const dateStr = isoDate(viewYear, viewMonth, d);
+        const isToday = today.getFullYear()===viewYear && today.getMonth()===viewMonth && today.getDate()===d;
+        const hasConflict = conflictDates.has(dateStr);
+        const clickFn = state._apptMode ? `openApptModal('${dateStr}')` : `openDayModal('${dateStr}')`;
+        const content = state._apptMode
+          ? renderApptDayContent(dateStr, allConflicts)
+          : renderDayShifts(dateStr);
+        cells += `<div class="day-cell${isToday?' today':''}" data-date="${dateStr}"
+            onclick="${clickFn}" oncontextmenu="openCopyMenu(event,'${dateStr}')">
+          <div class="day-number">${d}${hasConflict?'<span class="conflict-badge">⚠</span>':''}</div>
+          ${content}
+        </div>`;
+      }
+      return cells;
+    }
+
+    function renderDayShifts(dateStr) { return ''; }        // filled in Task 6
+    function renderApptDayContent(dateStr, allConflicts) { return ''; }  // filled in Task 8
+
+    function render() {
+      const { viewYear, viewMonth } = state.settings;
+      const conflictCount = detectConflicts(state).length;
+      document.getElementById('app').innerHTML = `
+        <header class="app-header">
+          <div class="print-header">Shift Calendar — ${MONTH_NAMES[viewMonth]} ${viewYear}</div>
+          <h1>Shift Calendar</h1>
+          <div class="month-nav">
+            <button class="nav-btn" onclick="prevMonth()">&#8249;</button>
+            <span class="month-label">${MONTH_NAMES[viewMonth]} ${viewYear}</span>
+            <button class="nav-btn" onclick="nextMonth()">&#8250;</button>
+          </div>
+          <button class="btn" onclick="goToToday()">Today</button>
+          <button class="btn${state._apptMode?' btn-active':''}" onclick="toggleApptMode()">
+            👁 ${state._apptMode?'← Shifts':'Appointments'}
+          </button>
+          <button class="btn" onclick="toggleConflictsPanel()">
+            ⚠ Conflicts${conflictCount?`<span class="badge">${conflictCount}</span>`:''}
+          </button>
+          <button class="btn" onclick="openSettings()">⚙ Settings</button>
+          <button class="btn" onclick="window.print()">🖨</button>
+        </header>
+        <div class="calendar-wrap">
+          <div class="calendar-main">
+            <div class="day-headers">${DAY_NAMES.map(d=>`<div class="day-header">${d}</div>`).join('')}</div>
+            <div class="calendar-grid">
+              <div class="days-grid">${renderCalendarGrid()}</div>
+            </div>
+            <footer class="coverage-footer">${renderCoverageFooter()}</footer>
+          </div>
+          <div id="conflicts-panel"></div>
+        </div>
+        <div id="modal-overlay"></div>`;
+      if (_conflictsPanelOpen) renderConflictsPanel();
+    }
+
+    // ── Navigation ────────────────────────────────────────────────────
+    function prevMonth() {
+      if (state.settings.viewMonth === 0) { state.settings.viewYear--; state.settings.viewMonth = 11; }
+      else state.settings.viewMonth--;
+      saveState(); render();
+    }
+    function nextMonth() {
+      if (state.settings.viewMonth === 11) { state.settings.viewYear++; state.settings.viewMonth = 0; }
+      else state.settings.viewMonth++;
+      saveState(); render();
+    }
+    function goToToday() {
+      state.settings.viewYear = new Date().getFullYear();
+      state.settings.viewMonth = new Date().getMonth();
+      saveState(); render();
+    }
+
+    // ── Stubs (replaced in later tasks) ──────────────────────────────
+    let _conflictsPanelOpen = false;
+    function toggleApptMode() {}
+    function toggleConflictsPanel() {}
+    function openSettings(tab) {}
+    function openDayModal(dateStr) {}
+    function openApptModal(dateStr) {}
+    function openMemberSchedule(memberId) {}
+    function renderConflictsPanel() {}
+    function openCopyMenu(event, dateStr) { event.preventDefault(); }
+
+    // ── Modal helpers ─────────────────────────────────────────────────
+    function closeModal() {
+      const overlay = document.getElementById('modal-overlay');
+      if (overlay) overlay.innerHTML = '';
+    }
+
+    // ── Keyboard shortcuts ────────────────────────────────────────────
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { closeModal(); }
+      const modalOpen = document.getElementById('modal-overlay')?.children.length > 0;
+      if (!modalOpen) {
+        if (e.key === 'ArrowLeft') prevMonth();
+        if (e.key === 'ArrowRight') nextMonth();
+      }
+    });
 
     // ── Init ──────────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', () => {

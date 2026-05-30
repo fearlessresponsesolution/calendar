@@ -146,6 +146,23 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .appt-note.conflict-note { color: var(--danger); }
 
+    /* Conflicts panel */
+    #conflicts-panel { width: 0; overflow: hidden; transition: width 0.2s ease;
+      border-left: 1px solid transparent; background: var(--surface2); flex-shrink: 0; }
+    #conflicts-panel.open { width: 300px; min-width: 300px; overflow-y: auto;
+      border-left-color: var(--border); }
+    .cp-inner { padding: 12px; min-width: 280px; }
+    .cp-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .cp-header strong { font-size: 13px; }
+    .conflict-card { background: var(--surface); border-radius: var(--radius); padding: 10px;
+      margin-bottom: 8px; border-left: 3px solid var(--danger); }
+    .conflict-date { font-weight: 600; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+    .conflict-who { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 3px; }
+    .conflict-appt-note { font-size: 12px; color: var(--text-muted); margin-bottom: 7px; }
+    .swap-select { width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--text); padding: 5px 8px; font-size: 12px; }
+    .no-conflicts-msg { text-align: center; padding: 32px 12px; color: var(--success); font-size: 13px; }
+
     /* Print-only header */
     .print-header { display: none; }
     @media print {
@@ -459,7 +476,10 @@
       state._apptMode = !state._apptMode;
       render();
     }
-    function toggleConflictsPanel() {}
+    function toggleConflictsPanel() {
+      _conflictsPanelOpen = !_conflictsPanelOpen;
+      renderConflictsPanel();
+    }
     let _dm = null;  // day modal transient state
 
     function openDayModal(dateStr) {
@@ -596,6 +616,113 @@
     }
     let _am = null;  // appointment modal transient state
 
+    function renderConflictsPanel() {
+      const panel = document.getElementById('conflicts-panel');
+      if (!panel) return;
+      if (!_conflictsPanelOpen) { panel.classList.remove('open'); panel.innerHTML = ''; return; }
+      panel.classList.add('open');
+      const { viewYear, viewMonth } = state.settings;
+      const conflicts = detectConflicts(state);
+      const monthLabel = `${MONTH_NAMES[viewMonth]} ${viewYear}`;
+
+      const headerEl = document.createElement('div');
+      headerEl.className = 'cp-header';
+      const title = document.createElement('strong');
+      title.textContent = `⚠ Conflicts — ${monthLabel}${conflicts.length?` (${conflicts.length})`:''}`;
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'modal-close';
+      closeBtn.textContent = '✕';
+      closeBtn.onclick = toggleConflictsPanel;
+      headerEl.appendChild(title);
+      headerEl.appendChild(closeBtn);
+
+      if (!conflicts.length) {
+        const inner = document.createElement('div');
+        inner.className = 'cp-inner';
+        inner.appendChild(headerEl);
+        const msg = document.createElement('div');
+        msg.className = 'no-conflicts-msg';
+        msg.textContent = '✓ No conflicts this month';
+        inner.appendChild(msg);
+        panel.innerHTML = '';
+        panel.appendChild(inner);
+        return;
+      }
+
+      const cards = conflicts.map(c => {
+        const member = state.members.find(m => m.id === c.memberId);
+        const shift = (state.schedule[c.dateStr]||[]).find(s => s.id === c.shiftId);
+        const appt = (state.appointments[c.memberId]||[]).find(a => a.id === c.apptId);
+        if (!member || !shift || !appt) return null;
+        const swaps = getAvailableSwaps(state, c.dateStr, c.shiftId, c.memberId);
+        const dateLabel = new Date(c.dateStr+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'});
+
+        const card = document.createElement('div');
+        card.className = 'conflict-card';
+
+        const dateDiv = document.createElement('div');
+        dateDiv.className = 'conflict-date';
+        dateDiv.textContent = `${dateLabel} · ${formatTime(shift.startTime)}–${formatTime(shift.endTime)}`;
+
+        const whoDiv = document.createElement('div');
+        whoDiv.className = 'conflict-who';
+        const dot = document.createElement('span');
+        dot.className = 'member-dot';
+        dot.style.background = member.color;
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = member.name;
+        whoDiv.appendChild(dot);
+        whoDiv.appendChild(nameSpan);
+
+        const noteDiv = document.createElement('div');
+        noteDiv.className = 'conflict-appt-note';
+        noteDiv.textContent = `📅 ${appt.note}${!appt.allDay?' · '+formatTime(appt.startTime)+'–'+formatTime(appt.endTime):' (all day)'}`;
+
+        card.appendChild(dateDiv);
+        card.appendChild(whoDiv);
+        card.appendChild(noteDiv);
+
+        if (swaps.length) {
+          const sel = document.createElement('select');
+          sel.className = 'swap-select';
+          const defaultOpt = document.createElement('option');
+          defaultOpt.value = '';
+          defaultOpt.textContent = '— Assign swap member —';
+          sel.appendChild(defaultOpt);
+          swaps.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.id;
+            opt.textContent = s.name;
+            sel.appendChild(opt);
+          });
+          sel.onchange = () => _applySwap(c.dateStr, c.shiftId, c.memberId, sel.value);
+          card.appendChild(sel);
+        } else {
+          const noSwap = document.createElement('span');
+          noSwap.style.cssText = 'color:var(--text-muted);font-size:12px;';
+          noSwap.textContent = 'No available same-role swaps';
+          card.appendChild(noSwap);
+        }
+
+        return card;
+      }).filter(Boolean);
+
+      const inner = document.createElement('div');
+      inner.className = 'cp-inner';
+      inner.appendChild(headerEl);
+      cards.forEach(c => inner.appendChild(c));
+      panel.innerHTML = '';
+      panel.appendChild(inner);
+    }
+
+    function _applySwap(dateStr, shiftId, conflictedMemberId, newMemberId) {
+      if (!newMemberId) return;
+      const shift = (state.schedule[dateStr]||[]).find(s => s.id === shiftId);
+      if (!shift) return;
+      shift.assignments = shift.assignments.map(id => id === conflictedMemberId ? newMemberId : id);
+      saveState(); render(); renderConflictsPanel();
+    }
+
     function openApptModal(dateStr) {
       _am = { dateStr, memberId: state.members[0]?.id||'', startTime:'09:00', endTime:'10:00', allDay:false, note:'' };
       _renderApptModal();
@@ -673,7 +800,6 @@
       saveState(); _renderApptModal(); render();
     }
     function openMemberSchedule(memberId) {}
-    function renderConflictsPanel() {}
     function openCopyMenu(event, dateStr) {
       event.preventDefault();
       document.querySelectorAll('.ctx-menu').forEach(el => el.remove());

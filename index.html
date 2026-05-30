@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shift Calendar</title>
+  <style>
+    @page { size: landscape; margin: 10mm; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #1a1a2e; --surface: #16213e; --surface2: #0f172a;
+      --border: #334155; --text: #e2e8f0; --text-muted: #94a3b8;
+      --accent: #3b82f6; --danger: #ef4444; --warn: #f59e0b;
+      --success: #10b981; --radius: 6px; --gap: 4px;
+    }
+    body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; min-height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    // ── Constants ──────────────────────────────────────────────────────
+    const STORAGE_KEY = 'shift_cal_v1';
+    const COLOR_PALETTE = [
+      '#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
+      '#06b6d4','#84cc16','#f97316','#ec4899','#14b8a6',
+      '#6366f1','#a3e635','#fb923c','#e879f9','#22d3ee',
+      '#4ade80','#fbbf24','#f43f5e','#818cf8','#34d399'
+    ];
+    const MONTH_NAMES = ['January','February','March','April','May','June',
+                         'July','August','September','October','November','December'];
+    const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+    // ── Default State ─────────────────────────────────────────────────
+    const DEFAULT_STATE = {
+      members: [],
+      roles: [],
+      shiftTemplates: [],
+      schedule: {},       // keyed by "YYYY-MM-DD"
+      appointments: {},   // keyed by memberId
+      settings: {
+        viewYear: new Date().getFullYear(),
+        viewMonth: new Date().getMonth()  // 0-indexed
+      }
+    };
+
+    // ── State Management ──────────────────────────────────────────────
+    let state = structuredClone(DEFAULT_STATE);
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) state = { ...structuredClone(DEFAULT_STATE), ...JSON.parse(raw) };
+      } catch (e) {
+        state = structuredClone(DEFAULT_STATE);
+      }
+    }
+
+    function saveState() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (e) {
+        showBanner('Storage full — consider exporting or clearing old month data.', 'warn');
+      }
+    }
+
+    function generateId() {
+      return Date.now().toString(36) + Math.random().toString(36).slice(2);
+    }
+
+    // ── Banner ────────────────────────────────────────────────────────
+    function showBanner(msg, type = 'info') {
+      const existing = document.getElementById('app-banner');
+      if (existing) existing.remove();
+      const el = document.createElement('div');
+      el.id = 'app-banner';
+      el.style.cssText = `position:fixed;top:0;left:0;right:0;padding:10px 16px;z-index:9999;
+        background:${type==='warn'?'#92400e':'#1e3a5f'};color:#fff;font-size:13px;
+        display:flex;justify-content:space-between;align-items:center;`;
+      el.innerHTML = `<span>${msg}</span><button onclick="this.parentElement.remove()"
+        style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px;">✕</button>`;
+      document.body.prepend(el);
+    }
+
+    // ── Render stub ───────────────────────────────────────────────────
+    function render() {
+      document.getElementById('app').innerHTML =
+        '<p style="padding:20px;color:#94a3b8">Loading…</p>';
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+      loadState();
+      state._apptMode = false;  // transient UI flag, never persisted
+      render();
+    });
+  </script>
+</body>
+</html>

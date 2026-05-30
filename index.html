@@ -179,6 +179,10 @@
       return Date.now().toString(36) + Math.random().toString(36).slice(2);
     }
 
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
     // ── Banner ────────────────────────────────────────────────────────
     function showBanner(msg, type = 'info') {
       const existing = document.getElementById('app-banner');
@@ -324,12 +328,12 @@
         const chips = shift.assignments.map(mid => {
           const m = state.members.find(m => m.id === mid);
           if (!m) return '';
-          return `<span class="member-chip" data-member-id="${m.id}" title="${m.name}">
-            <span class="member-dot" style="background:${m.color}"></span>${m.name.split(' ')[0]}
+          return `<span class="member-chip" data-member-id="${m.id}" title="${escapeHtml(m.name)}">
+            <span class="member-dot" style="background:${m.color}"></span>${escapeHtml(m.name.split(' ')[0])}
           </span>`;
         }).join('');
         return `<div class="shift-bar${unassigned?' unassigned':''}"
-            style="${unassigned?'':'background:'+bgColor}" title="${tmplName}">
+            style="${unassigned?'':'background:'+bgColor}" title="${escapeHtml(tmplName)}">
           <div class="shift-time">${formatTime(shift.startTime)}–${formatTime(shift.endTime)}</div>
           ${unassigned
             ? '<div style="font-size:10px;">Unassigned</div>'
@@ -431,7 +435,7 @@
     function renderRolesTab() {
       const rows = state.roles.map(r => `
         <div class="item-row">
-          <span class="row-name">${r.name}</span>
+          <span class="row-name">${escapeHtml(r.name)}</span>
           <button class="btn btn-danger" onclick="deleteRole('${r.id}')">Delete</button>
         </div>`).join('');
       return `
@@ -466,8 +470,8 @@
         const role = state.roles.find(r => r.id === m.roleId);
         return `<div class="item-row">
           <span class="color-dot" style="background:${m.color}"></span>
-          <span class="row-name">${m.name}
-            <span style="color:var(--text-muted);font-size:12px;">${role?.name||'—'}</span>
+          <span class="row-name">${escapeHtml(m.name)}
+            <span style="color:var(--text-muted);font-size:12px;">${escapeHtml(role?.name||'—')}</span>
           </span>
           <input type="color" class="color-swatch" value="${m.color}" style="background:${m.color}"
             oninput="updateMemberColor('${m.id}',this.value)">
@@ -515,7 +519,7 @@
     function renderTemplatesTab() {
       const rows = state.shiftTemplates.map(t => `
         <div class="item-row">
-          <span class="row-name">${t.name}</span>
+          <span class="row-name">${escapeHtml(t.name)}</span>
           <span style="color:var(--text-muted);font-size:12px;">${formatTime(t.startTime)}–${formatTime(t.endTime)}</span>
           <button class="btn btn-danger" onclick="deleteTemplate('${t.id}')">✕</button>
         </div>`).join('');

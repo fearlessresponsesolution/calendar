@@ -77,8 +77,14 @@
       el.style.cssText = `position:fixed;top:0;left:0;right:0;padding:10px 16px;z-index:9999;
         background:${type==='warn'?'#92400e':'#1e3a5f'};color:#fff;font-size:13px;
         display:flex;justify-content:space-between;align-items:center;`;
-      el.innerHTML = `<span>${msg}</span><button onclick="this.parentElement.remove()"
-        style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px;">✕</button>`;
+      const span = document.createElement('span');
+      span.textContent = msg;
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = '✕';
+      closeBtn.style.cssText = 'background:none;border:none;color:#fff;cursor:pointer;font-size:16px;';
+      closeBtn.onclick = () => el.remove();
+      el.appendChild(span);
+      el.appendChild(closeBtn);
       document.body.prepend(el);
     }
 

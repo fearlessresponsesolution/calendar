@@ -257,7 +257,7 @@
           ? renderApptDayContent(dateStr, allConflicts)
           : renderDayShifts(dateStr);
         cells += `<div class="day-cell${isToday?' today':''}" data-date="${dateStr}"
-            onclick="${clickFn}" oncontextmenu="openCopyMenu(event,'${dateStr}')">
+            oncontextmenu="openCopyMenu(event,this.dataset.date)">
           <div class="day-number">${d}${hasConflict?'<span class="conflict-badge">⚠</span>':''}</div>
           ${content}
         </div>`;
@@ -353,6 +353,16 @@
       loadState();
       state._apptMode = false;  // transient UI flag, never persisted
       render();
+      document.getElementById('app').addEventListener('click', e => {
+        const cell = e.target.closest('.day-cell:not(.outside)');
+        if (cell && !e.target.closest('.member-chip') && !e.target.closest('.shift-bar button')) {
+          const dateStr = cell.dataset.date;
+          if (dateStr) {
+            if (state._apptMode) openApptModal(dateStr);
+            else openDayModal(dateStr);
+          }
+        }
+      });
     });
   </script>
 </body>

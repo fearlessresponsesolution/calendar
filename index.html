@@ -487,9 +487,44 @@
       saveState(); openSettings('members'); render();
     }
 
-    // ── Templates tab stub (replaced in Task 5) ───────────────────────
+    // ── Templates tab ─────────────────────────────────────────────────
     function renderTemplatesTab() {
-      return '<p class="empty-hint">Shift Templates — coming in next step.</p>';
+      const rows = state.shiftTemplates.map(t => `
+        <div class="item-row">
+          <span class="row-name">${t.name}</span>
+          <span style="color:var(--text-muted);font-size:12px;">${formatTime(t.startTime)}–${formatTime(t.endTime)}</span>
+          <button class="btn btn-danger" onclick="deleteTemplate('${t.id}')">✕</button>
+        </div>`).join('');
+      return `
+        <div class="item-list">${rows||'<p class="empty-hint">No templates yet.</p>'}</div>
+        <div class="add-form">
+          <input id="tmpl-name" placeholder="Name (e.g. Morning)" style="min-width:110px;">
+          <input id="tmpl-start" type="time" value="06:00">
+          <span style="color:var(--text-muted);font-size:13px;">to</span>
+          <input id="tmpl-end" type="time" value="14:00">
+          <button class="btn btn-primary" onclick="addTemplate()">Add</button>
+        </div>`;
+    }
+
+    function addTemplate() {
+      const name = document.getElementById('tmpl-name').value.trim();
+      const startTime = document.getElementById('tmpl-start').value;
+      const endTime = document.getElementById('tmpl-end').value;
+      if (!name || !startTime || !endTime) return;
+      state.shiftTemplates.push({ id: generateId(), name, startTime, endTime });
+      saveState(); openSettings('templates'); render();
+    }
+
+    function deleteTemplate(id) {
+      const inUse = Object.values(state.schedule).some(shifts =>
+        shifts.some(s => s.templateId === id));
+      if (inUse) {
+        if (!confirm('This template is used in the schedule. Delete it? Existing shifts will become ad-hoc.')) return;
+        Object.values(state.schedule).forEach(shifts =>
+          shifts.forEach(s => { if (s.templateId === id) { s.templateId = null; s.isAdHoc = true; } }));
+      }
+      state.shiftTemplates = state.shiftTemplates.filter(t => t.id !== id);
+      saveState(); openSettings('templates'); render();
     }
 
     // ── Modal helpers ─────────────────────────────────────────────────

@@ -1,0 +1,17 @@
+# Sensitive environment variables (Database credentials, API keys)
+.env
+.env.local
+.env.production
+.env.development
+.env.*.local
+
+# Dependency directories
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# IDE config files and logs
+.DS_Store
+*.log

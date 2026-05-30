@@ -28,7 +28,9 @@
   }
 
   // ── Functions under test ─────────────────────────────────────────
-  // (Keep these in sync with index.html)
+  // NOTE: Functions below are intentionally duplicated from index.html.
+  // The app runs from file:// with no module system, so sharing via import is not possible.
+  // Keep these in sync manually when index.html utility functions change.
 
   const COLOR_PALETTE = [
     '#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
@@ -63,6 +65,12 @@
     return `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
   }
 
+  function formatTime(t) {
+    if (!t) return '';
+    const [h, m] = t.split(':').map(Number);
+    return `${h % 12 || 12}:${String(m).padStart(2,'0')}${h >= 12 ? 'pm' : 'am'}`;
+  }
+
   function detectConflicts(st) {
     const { viewYear, viewMonth } = st.settings;
     const days = getDaysInMonth(viewYear, viewMonth);
@@ -91,16 +99,11 @@
     return st.members.filter(m => {
       if (m.id === conflictedMemberId) return false;
       if (m.roleId !== conflicted.roleId) return false;
-      const doubleBooked = dayShifts.some(s =>
-        s.id !== shiftId && s.assignments.includes(m.id) &&
-        rangesOverlap(shift.startTime, shift.endTime, s.startTime, s.endTime)
-      );
-      if (doubleBooked) return false;
-      const apptConflict = (st.appointments[m.id] || []).some(a =>
-        a.date === dateStr && (a.allDay ||
-        rangesOverlap(shift.startTime, shift.endTime, a.startTime, a.endTime))
-      );
-      return !apptConflict;
+      if (dayShifts.some(s => s.id !== shiftId && s.assignments.includes(m.id) &&
+          rangesOverlap(shift.startTime, shift.endTime, s.startTime, s.endTime))) return false;
+      if ((st.appointments[m.id] || []).some(a => a.date === dateStr &&
+          (a.allDay || rangesOverlap(shift.startTime, shift.endTime, a.startTime, a.endTime)))) return false;
+      return true;
     });
   }
 
@@ -133,6 +136,14 @@
 
   // isoDate
   test('isoDate: pads month and day', () => assertEqual(isoDate(2026, 5, 3), '2026-06-03'));
+
+  // formatTime
+  test('formatTime: midnight → 12:00am', () => assertEqual(formatTime('00:00'), '12:00am'));
+  test('formatTime: noon → 12:00pm', () => assertEqual(formatTime('12:00'), '12:00pm'));
+  test('formatTime: 06:00 → 6:00am', () => assertEqual(formatTime('06:00'), '6:00am'));
+  test('formatTime: 14:00 → 2:00pm', () => assertEqual(formatTime('14:00'), '2:00pm'));
+  test('formatTime: 22:30 → 10:30pm', () => assertEqual(formatTime('22:30'), '10:30pm'));
+  test('formatTime: empty string → empty string', () => assertEqual(formatTime(''), ''));
 
   // detectConflicts
   test('detectConflicts: no conflicts when schedule empty', () => {

@@ -200,6 +200,18 @@
   <script>
     // ── Constants ──────────────────────────────────────────────────────
     const STORAGE_KEY = 'shift_cal_v1';
+    const DB_NAME = 'shift_cal_db';
+    const DB_STORE = 'kv';
+    let _db = null;
+    function _getDB() {
+      if (_db) return Promise.resolve(_db);
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = e => e.target.result.createObjectStore(DB_STORE);
+        req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+        req.onerror = e => reject(e.target.error);
+      });
+    }
     const COLOR_PALETTE = [
       '#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
       '#06b6d4','#84cc16','#f97316','#ec4899','#14b8a6',
@@ -226,21 +238,47 @@
     // ── State Management ──────────────────────────────────────────────
     let state = structuredClone(DEFAULT_STATE);
 
-    function loadState() {
+    async function loadState() {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) state = { ...structuredClone(DEFAULT_STATE), ...JSON.parse(raw) };
-      } catch (e) {
-        state = structuredClone(DEFAULT_STATE);
+        const db = await _getDB();
+        const saved = await new Promise((resolve, reject) => {
+          const req = db.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).get(STORAGE_KEY);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+        if (saved) {
+          state = { ...structuredClone(DEFAULT_STATE), ...saved };
+        } else {
+          // one-time migration from localStorage
+          try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (raw) {
+              state = { ...structuredClone(DEFAULT_STATE), ...JSON.parse(raw) };
+              saveState();
+              localStorage.removeItem(STORAGE_KEY);
+            }
+          } catch {}
+        }
+      } catch {
+        // IndexedDB unavailable — fall back to localStorage
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) state = { ...structuredClone(DEFAULT_STATE), ...JSON.parse(raw) };
+        } catch {}
       }
     }
 
     function saveState() {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      } catch (e) {
-        showBanner('Storage full — consider exporting or clearing old month data.', 'warn');
-      }
+      _getDB().then(db => {
+        const tx = db.transaction(DB_STORE, 'readwrite');
+        tx.objectStore(DB_STORE).put(structuredClone(state), STORAGE_KEY);
+      }).catch(() => {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch (e) {
+          if (e.name === 'QuotaExceededError') showBanner('Storage full — consider exporting or clearing old month data.', 'warn');
+        }
+      });
     }
 
     function generateId() {
@@ -1057,8 +1095,8 @@
     });
 
     // ── Init ──────────────────────────────────────────────────────────
-    document.addEventListener('DOMContentLoaded', () => {
-      loadState();
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadState();
       state._apptMode = false;  // transient UI flag, never persisted
       render();
       document.getElementById('app').addEventListener('click', e => {

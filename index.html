@@ -368,6 +368,17 @@
                 rangesOverlap(shift.startTime, shift.endTime, appt.startTime, appt.endTime);
               if (conflict) conflicts.push({ dateStr, shiftId: shift.id, memberId, apptId: appt.id });
             }
+            // For midnight-spanning shifts, also check next-day appointments
+            if (timeToMinutes(shift.endTime) <= timeToMinutes(shift.startTime)) {
+              const nd = new Date(dateStr + 'T12:00:00');
+              nd.setDate(nd.getDate() + 1);
+              const nextDateStr = isoDate(nd.getFullYear(), nd.getMonth(), nd.getDate());
+              for (const appt of (st.appointments[memberId] || []).filter(a => a.date === nextDateStr)) {
+                const conflict = appt.allDay ||
+                  rangesOverlap('00:00', shift.endTime, appt.startTime, appt.endTime);
+                if (conflict) conflicts.push({ dateStr, shiftId: shift.id, memberId, apptId: appt.id });
+              }
+            }
           }
         }
       }
@@ -647,7 +658,7 @@
 
     function openDayModal(dateStr) {
       if (state._apptMode) { openApptModal(dateStr); return; }
-      _dm = { dateStr, adding: false, editId: null, templateId: '', startTime: '06:00', endTime: '14:00', assignments: [] };
+      _dm = { dateStr, adding: false, editId: null, templateId: '', startTime: '06:00', endTime: '14:00', assignments: [], memberSearch: '' };
       _renderDayModal();
     }
 
@@ -674,7 +685,8 @@
       const formHtml = (_dm.adding || _dm.editId) ? _renderShiftForm() :
         `<button class="btn btn-primary" onclick="_dm.adding=true;_renderDayModal()">+ Add Shift</button>`;
 
-      document.getElementById('modal-overlay').innerHTML = `
+      const overlay = document.getElementById('modal-overlay');
+      overlay.innerHTML = `
         <div class="modal modal-lg">
           <div class="modal-header">
             <h2>${dateLabel}</h2>
@@ -685,6 +697,12 @@
             ${formHtml}
           </div>
         </div>`;
+      overlay.onclick = e => {
+        if (e.target !== overlay) return;
+        if (_dm && (_dm.adding || _dm.editId) && !confirm('Discard unsaved changes?')) return;
+        closeModal();
+      };
+      if (_dm?.memberSearch) _filterMembers(_dm.memberSearch);
     }
 
     function _renderShiftForm() {
@@ -726,6 +744,9 @@
             onchange="_dm.endTime=this.value;_renderDayModal()"></label>
         </div>
         <div class="section-label">Assign Members</div>
+        <input type="text" id="member-search" placeholder="Search members…" value="${escapeHtml(_dm.memberSearch||'')}"
+          oninput="_dm.memberSearch=this.value;_filterMembers(this.value)"
+          style="width:100%;box-sizing:border-box;padding:5px 8px;margin-bottom:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:13px;">
         ${memberGroups || '<p class="empty-hint">No members — add them in ⚙ Settings.</p>'}
         <div style="display:flex;gap:8px;margin-top:12px;">
           <button class="btn btn-primary" onclick="_saveShift()">
@@ -736,6 +757,16 @@
       </div>`;
     }
 
+    function _filterMembers(val) {
+      const q = (val || '').toLowerCase();
+      document.querySelectorAll('.member-check').forEach(el => {
+        el.style.display = !q || el.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+      document.querySelectorAll('.role-group').forEach(g => {
+        const visible = [...g.querySelectorAll('.member-check')].some(el => el.style.display !== 'none');
+        g.style.display = visible ? '' : 'none';
+      });
+    }
     function _pickTemplate(tid) {
       _dm.templateId = tid;
       const t = state.shiftTemplates.find(t => t.id === tid);
@@ -858,7 +889,12 @@
             opt.textContent = s.name;
             sel.appendChild(opt);
           });
-          sel.onchange = () => _applySwap(c.dateStr, c.shiftId, c.memberId, sel.value);
+          sel.onchange = () => {
+            if (!sel.value) return;
+            const swapName = swaps.find(s => s.id === sel.value)?.name || 'selected member';
+            if (!confirm(`Replace ${member.name} with ${swapName} on this shift?`)) { sel.value = ''; return; }
+            _applySwap(c.dateStr, c.shiftId, c.memberId, sel.value);
+          };
           card.appendChild(sel);
         } else {
           const noSwap = document.createElement('span');
@@ -1021,8 +1057,13 @@
       item2.className = 'ctx-item';
       item2.textContent = 'Copy shifts to next week';
       item2.onclick = () => { _copyShifts(dateStr, 7); menu.remove(); };
+      const item3 = document.createElement('div');
+      item3.className = 'ctx-item';
+      item3.textContent = 'Fill month with this week\'s pattern';
+      item3.onclick = () => { _repeatWeekForMonth(dateStr); menu.remove(); };
       menu.appendChild(item1);
       menu.appendChild(item2);
+      menu.appendChild(item3);
       document.body.appendChild(menu);
       setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 0);
     }
@@ -1036,6 +1077,38 @@
       if (!state.schedule[target]) state.schedule[target] = [];
       src.forEach(s => state.schedule[target].push({ ...s, id: generateId() }));
       saveState(); render();
+    }
+
+    function _repeatWeekForMonth(dateStr) {
+      const { viewYear, viewMonth } = state.settings;
+      const anchor = new Date(dateStr + 'T12:00:00');
+      // Find Sunday of the week containing dateStr
+      const weekStart = new Date(anchor);
+      weekStart.setDate(anchor.getDate() - anchor.getDay());
+      // Build 7-day template: offset → shifts[]
+      const template = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(weekStart);
+        d.setDate(weekStart.getDate() + i);
+        const ds = isoDate(d.getFullYear(), d.getMonth(), d.getDate());
+        template.push(state.schedule[ds] || []);
+      }
+      if (template.every(s => !s.length)) return;
+      let changed = false;
+      for (let week = 1; week <= 5; week++) {
+        for (let i = 0; i < 7; i++) {
+          const src = template[i];
+          if (!src.length) continue;
+          const d = new Date(weekStart);
+          d.setDate(weekStart.getDate() + week * 7 + i);
+          if (d.getFullYear() !== viewYear || d.getMonth() !== viewMonth) continue;
+          const ds = isoDate(d.getFullYear(), d.getMonth(), d.getDate());
+          if (!state.schedule[ds]) state.schedule[ds] = [];
+          src.forEach(s => state.schedule[ds].push({ ...s, id: generateId() }));
+          changed = true;
+        }
+      }
+      if (changed) { saveState(); render(); }
     }
 
     // ── Settings Modal ────────────────────────────────────────────

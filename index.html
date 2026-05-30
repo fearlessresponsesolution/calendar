@@ -177,11 +177,24 @@
       border-radius: var(--radius); color: var(--text); padding: 5px 8px; font-size: 12px; }
     .no-conflicts-msg { text-align: center; padding: 32px 12px; color: var(--success); font-size: 13px; }
 
+    #workload-panel { width: 0; overflow: hidden; transition: width 0.2s ease;
+      border-left: 1px solid transparent; background: var(--surface2); flex-shrink: 0; }
+    #workload-panel.open { width: 300px; min-width: 300px; overflow-y: auto;
+      border-left-color: var(--border); }
+    .wl-row { display: flex; flex-direction: column; gap: 3px; padding: 8px 0;
+      border-bottom: 1px solid var(--border); }
+    .wl-row:last-child { border-bottom: none; }
+    .wl-who { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+    .wl-meta { font-size: 11px; color: var(--text-muted); padding-left: 20px; }
+    .wl-bar-wrap { padding-left: 20px; margin-top: 3px; }
+    .wl-bar-bg { background: var(--border); border-radius: 3px; height: 5px; width: 100%; }
+    .wl-bar-fill { height: 5px; border-radius: 3px; background: var(--accent); transition: width 0.2s; }
+
     /* Print-only header */
     .print-header { display: none; }
     @media print {
       .print-header { display: block; font-size: 20px; font-weight: 700; margin-bottom: 8px; color: #000; }
-      .app-header .btn, .app-header .nav-btn, #conflicts-panel,
+      .app-header .btn, .app-header .nav-btn, #conflicts-panel, #workload-panel,
       #modal-overlay, #app-banner { display: none !important; }
       .app-header { border-bottom: 1px solid #ccc; }
       .month-label { color: #000 !important; }
@@ -489,6 +502,7 @@
           <button class="btn" onclick="toggleConflictsPanel()" id="tour-conflicts-btn">
             ⚠ Conflicts${conflictCount?`<span class="badge">${conflictCount}</span>`:''}
           </button>
+          <button class="btn" onclick="toggleWorkloadPanel()" id="tour-workload-btn">📊 Workload</button>
           <button class="btn" onclick="openSettings()" id="tour-settings-btn">⚙ Settings</button>
           <button class="btn" onclick="window.print()" id="tour-print-btn">🖨</button>
           <button class="btn" onclick="startTour()" id="tour-start-btn" style="border-color:var(--accent);color:var(--accent);">? Tour</button>
@@ -502,9 +516,11 @@
             <footer class="coverage-footer" id="tour-coverage-footer">${renderCoverageFooter()}</footer>
           </div>
           <div id="conflicts-panel"></div>
+          <div id="workload-panel"></div>
         </div>
         <div id="modal-overlay"></div>`;
       if (_conflictsPanelOpen) renderConflictsPanel();
+      if (_workloadPanelOpen) renderWorkloadPanel();
     }
 
     // ── Navigation ────────────────────────────────────────────────────
@@ -533,6 +549,99 @@
     function toggleConflictsPanel() {
       _conflictsPanelOpen = !_conflictsPanelOpen;
       renderConflictsPanel();
+    }
+    let _workloadPanelOpen = false;
+    function toggleWorkloadPanel() {
+      _workloadPanelOpen = !_workloadPanelOpen;
+      renderWorkloadPanel();
+    }
+    function renderWorkloadPanel() {
+      const panel = document.getElementById('workload-panel');
+      if (!panel) return;
+      if (!_workloadPanelOpen) { panel.classList.remove('open'); panel.innerHTML = ''; return; }
+      panel.classList.add('open');
+      const { viewYear, viewMonth } = state.settings;
+      const days = getDaysInMonth(viewYear, viewMonth);
+      const monthLabel = `${MONTH_NAMES[viewMonth]} ${viewYear}`;
+
+      const memberStats = state.members.map(m => {
+        let shiftCount = 0, totalMins = 0;
+        for (let d = 1; d <= days; d++) {
+          const dateStr = isoDate(viewYear, viewMonth, d);
+          (state.schedule[dateStr] || []).forEach(s => {
+            if (!s.assignments.includes(m.id)) return;
+            shiftCount++;
+            const start = timeToMinutes(s.startTime);
+            let end = timeToMinutes(s.endTime);
+            if (end <= start) end += 1440;
+            totalMins += end - start;
+          });
+        }
+        return { m, shiftCount, totalHours: +(totalMins / 60).toFixed(1) };
+      }).sort((a, b) => b.totalHours - a.totalHours);
+
+      const maxHours = memberStats.reduce((mx, s) => Math.max(mx, s.totalHours), 0) || 1;
+
+      const inner = document.createElement('div');
+      inner.className = 'cp-inner';
+
+      const headerEl = document.createElement('div');
+      headerEl.className = 'cp-header';
+      const title = document.createElement('strong');
+      title.textContent = `📊 Workload — ${monthLabel}`;
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'modal-close';
+      closeBtn.textContent = '✕';
+      closeBtn.onclick = toggleWorkloadPanel;
+      headerEl.appendChild(title);
+      headerEl.appendChild(closeBtn);
+      inner.appendChild(headerEl);
+
+      if (!memberStats.length) {
+        const msg = document.createElement('div');
+        msg.style.cssText = 'text-align:center;padding:32px 12px;color:var(--text-muted);font-size:13px;';
+        msg.textContent = 'No members yet. Add members in ⚙ Settings.';
+        inner.appendChild(msg);
+      } else {
+        memberStats.forEach(({ m, shiftCount, totalHours }) => {
+          const role = state.roles.find(r => r.id === m.roleId);
+          const row = document.createElement('div');
+          row.className = 'wl-row';
+
+          const who = document.createElement('div');
+          who.className = 'wl-who';
+          const dot = document.createElement('span');
+          dot.className = 'member-dot';
+          dot.style.background = m.color;
+          const name = document.createElement('span');
+          name.textContent = m.name;
+          who.appendChild(dot);
+          who.appendChild(name);
+
+          const meta = document.createElement('div');
+          meta.className = 'wl-meta';
+          meta.textContent = `${shiftCount} shift${shiftCount !== 1 ? 's' : ''} · ${totalHours}h · ${role?.name || '—'}`;
+
+          const barWrap = document.createElement('div');
+          barWrap.className = 'wl-bar-wrap';
+          const barBg = document.createElement('div');
+          barBg.className = 'wl-bar-bg';
+          const barFill = document.createElement('div');
+          barFill.className = 'wl-bar-fill';
+          barFill.style.width = `${(totalHours / maxHours) * 100}%`;
+          barFill.style.background = m.color;
+          barBg.appendChild(barFill);
+          barWrap.appendChild(barBg);
+
+          row.appendChild(who);
+          row.appendChild(meta);
+          row.appendChild(barWrap);
+          inner.appendChild(row);
+        });
+      }
+
+      panel.innerHTML = '';
+      panel.appendChild(inner);
     }
     let _dm = null;  // day modal transient state
 

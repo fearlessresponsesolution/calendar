@@ -799,7 +799,50 @@
       });
       saveState(); _renderApptModal(); render();
     }
-    function openMemberSchedule(memberId) {}
+    function openMemberSchedule(memberId) {
+      const member = state.members.find(m => m.id === memberId);
+      if (!member) return;
+      const { viewYear, viewMonth } = state.settings;
+      const days = getDaysInMonth(viewYear, viewMonth);
+      const role = state.roles.find(r => r.id === member.roleId);
+      const shifts = [];
+      for (let d = 1; d <= days; d++) {
+        const dateStr = isoDate(viewYear, viewMonth, d);
+        (state.schedule[dateStr]||[]).forEach(s => {
+          if (s.assignments.includes(memberId)) shifts.push({ dateStr, s });
+        });
+      }
+      const rows = shifts.length
+        ? shifts.map(({ dateStr, s }) => {
+            const dl = new Date(dateStr+'T12:00:00').toLocaleDateString('en-US',
+              { weekday:'short', month:'short', day:'numeric' });
+            const tmpl = s.templateId ? (state.shiftTemplates.find(t=>t.id===s.templateId)?.name||'Custom') : 'Custom';
+            return `<div class="shift-edit-row">
+              <div class="shift-edit-info">
+                <div class="shift-edit-time">${dl}</div>
+                <div class="shift-edit-sub">${formatTime(s.startTime)}–${formatTime(s.endTime)} · ${escapeHtml(tmpl)}</div>
+              </div>
+            </div>`;
+          }).join('')
+        : '<p class="empty-hint">No shifts scheduled this month.</p>';
+
+      document.getElementById('modal-overlay').innerHTML = `
+        <div class="modal">
+          <div class="modal-header">
+            <h2 style="display:flex;align-items:center;gap:8px;">
+              <span class="member-dot" style="background:${member.color};width:14px;height:14px;"></span>
+              ${escapeHtml(member.name)} — ${MONTH_NAMES[viewMonth]}
+            </h2>
+            <button class="modal-close" onclick="closeModal()">✕</button>
+          </div>
+          <div class="modal-body">
+            <p style="color:var(--text-muted);font-size:12px;margin-bottom:12px;">
+              Role: ${escapeHtml(role?.name||'—')} · ${shifts.length} shift${shifts.length!==1?'s':''} this month
+            </p>
+            ${rows}
+          </div>
+        </div>`;
+    }
     function openCopyMenu(event, dateStr) {
       event.preventDefault();
       document.querySelectorAll('.ctx-menu').forEach(el => el.remove());

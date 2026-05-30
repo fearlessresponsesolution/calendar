@@ -88,6 +88,75 @@
       document.body.prepend(el);
     }
 
+    // ── Utilities ─────────────────────────────────────────────────────
+    function timeToMinutes(t) {
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + m;
+    }
+
+    function rangesOverlap(s1, e1, s2, e2) {
+      let start1 = timeToMinutes(s1), end1 = timeToMinutes(e1);
+      let start2 = timeToMinutes(s2), end2 = timeToMinutes(e2);
+      if (end1 <= start1) end1 += 1440;
+      if (end2 <= start2) end2 += 1440;
+      if (end1 > 1440 && start2 < start1) { start2 += 1440; end2 += 1440; }
+      return start1 < end2 && start2 < end1;
+    }
+
+    function getNextColor(members) {
+      return COLOR_PALETTE[members.length % COLOR_PALETTE.length];
+    }
+
+    function getDaysInMonth(year, month) {
+      return new Date(year, month + 1, 0).getDate();
+    }
+
+    function isoDate(year, month, day) {
+      return `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    }
+
+    function formatTime(t) {
+      if (!t) return '';
+      const [h, m] = t.split(':').map(Number);
+      return `${h % 12 || 12}:${String(m).padStart(2,'0')}${h >= 12 ? 'pm' : 'am'}`;
+    }
+
+    function detectConflicts(st) {
+      const { viewYear, viewMonth } = st.settings;
+      const days = getDaysInMonth(viewYear, viewMonth);
+      const conflicts = [];
+      for (let d = 1; d <= days; d++) {
+        const dateStr = isoDate(viewYear, viewMonth, d);
+        for (const shift of (st.schedule[dateStr] || [])) {
+          for (const memberId of shift.assignments) {
+            for (const appt of (st.appointments[memberId] || []).filter(a => a.date === dateStr)) {
+              const conflict = appt.allDay ||
+                rangesOverlap(shift.startTime, shift.endTime, appt.startTime, appt.endTime);
+              if (conflict) conflicts.push({ dateStr, shiftId: shift.id, memberId, apptId: appt.id });
+            }
+          }
+        }
+      }
+      return conflicts;
+    }
+
+    function getAvailableSwaps(st, dateStr, shiftId, conflictedMemberId) {
+      const shift = (st.schedule[dateStr] || []).find(s => s.id === shiftId);
+      if (!shift) return [];
+      const conflicted = st.members.find(m => m.id === conflictedMemberId);
+      if (!conflicted) return [];
+      const dayShifts = st.schedule[dateStr] || [];
+      return st.members.filter(m => {
+        if (m.id === conflictedMemberId) return false;
+        if (m.roleId !== conflicted.roleId) return false;
+        if (dayShifts.some(s => s.id !== shiftId && s.assignments.includes(m.id) &&
+            rangesOverlap(shift.startTime, shift.endTime, s.startTime, s.endTime))) return false;
+        if ((st.appointments[m.id] || []).some(a => a.date === dateStr &&
+            (a.allDay || rangesOverlap(shift.startTime, shift.endTime, a.startTime, a.endTime)))) return false;
+        return true;
+      });
+    }
+
     // ── Render stub ───────────────────────────────────────────────────
     function render() {
       document.getElementById('app').innerHTML =

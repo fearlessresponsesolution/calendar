@@ -6,6 +6,20 @@
   <title>Shift Calendar</title>
   <style>
     @page { size: landscape; margin: 10mm; }
+    /* Tour */
+    .tour-spotlight { position: fixed; z-index: 10001; border-radius: 8px; pointer-events: none;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.72); transition: top 0.25s, left 0.25s, width 0.25s, height 0.25s; }
+    .tour-card { position: fixed; z-index: 10002; width: 300px; background: var(--surface2);
+      border: 1px solid var(--accent); border-radius: 10px; padding: 18px 20px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6); }
+    .tour-card h3 { font-size: 14px; font-weight: 700; color: var(--accent); margin-bottom: 8px; }
+    .tour-card p { font-size: 13px; color: var(--text); line-height: 1.55; margin-bottom: 14px; }
+    .tour-dots { display: flex; gap: 5px; margin-bottom: 12px; }
+    .tour-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); transition: background 0.2s; }
+    .tour-dot.active { background: var(--accent); }
+    .tour-controls { display: flex; align-items: center; gap: 8px; }
+    .tour-controls .step-count { font-size: 11px; color: var(--text-muted); margin-right: auto; }
+    @media print { .tour-spotlight, .tour-card { display: none !important; } }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       --bg: #1a1a2e; --surface: #16213e; --surface2: #0f172a;
@@ -424,28 +438,29 @@
         <header class="app-header">
           <div class="print-header">Shift Calendar — ${MONTH_NAMES[viewMonth]} ${viewYear}</div>
           <h1>Shift Calendar</h1>
-          <div class="month-nav">
+          <div class="month-nav" id="tour-month-nav">
             <button class="nav-btn" onclick="prevMonth()">&#8249;</button>
             <span class="month-label">${MONTH_NAMES[viewMonth]} ${viewYear}</span>
             <button class="nav-btn" onclick="nextMonth()">&#8250;</button>
           </div>
           <button class="btn" onclick="goToToday()">Today</button>
-          <button class="btn${state._apptMode?' btn-active':''}" onclick="toggleApptMode()">
+          <button class="btn${state._apptMode?' btn-active':''}" onclick="toggleApptMode()" id="tour-appt-btn">
             👁 ${state._apptMode?'← Shifts':'Appointments'}
           </button>
-          <button class="btn" onclick="toggleConflictsPanel()">
+          <button class="btn" onclick="toggleConflictsPanel()" id="tour-conflicts-btn">
             ⚠ Conflicts${conflictCount?`<span class="badge">${conflictCount}</span>`:''}
           </button>
-          <button class="btn" onclick="openSettings()">⚙ Settings</button>
-          <button class="btn" onclick="window.print()">🖨</button>
+          <button class="btn" onclick="openSettings()" id="tour-settings-btn">⚙ Settings</button>
+          <button class="btn" onclick="window.print()" id="tour-print-btn">🖨</button>
+          <button class="btn" onclick="startTour()" id="tour-start-btn" style="border-color:var(--accent);color:var(--accent);">? Tour</button>
         </header>
         <div class="calendar-wrap">
           <div class="calendar-main">
             <div class="day-headers">${DAY_NAMES.map(d=>`<div class="day-header">${d}</div>`).join('')}</div>
             <div class="calendar-grid">
-              <div class="days-grid">${renderCalendarGrid()}</div>
+              <div class="days-grid" id="tour-days-grid">${renderCalendarGrid()}</div>
             </div>
-            <footer class="coverage-footer">${renderCoverageFooter()}</footer>
+            <footer class="coverage-footer" id="tour-coverage-footer">${renderCoverageFooter()}</footer>
           </div>
           <div id="conflicts-panel"></div>
         </div>
@@ -1064,6 +1079,205 @@
         }
       });
     });
-  </script>
+
+    // ── Tour ──────────────────────────────────────────────────────────
+    const TOUR_STEPS = [
+      {
+        title: 'Welcome to Shift Calendar!',
+        text: 'This quick tour walks you through the key features. Use Next / Back to navigate, or press Escape to exit at any time.',
+        target: null, position: 'center'
+      },
+      {
+        title: '⚙ Settings — Start Here',
+        text: 'Before building a schedule, click Settings to create your Roles (e.g. Nurse, Technician), add up to 30+ Members with auto-assigned colors, and define reusable Shift Templates like Morning (6am–2pm) and Evening (2pm–10pm).',
+        target: 'tour-settings-btn', position: 'bottom'
+      },
+      {
+        title: 'Navigate Months',
+        text: 'Use the ◄ ► arrows to move between months, or press the ← → keyboard arrow keys. Click Today to jump back to the current month. Each month\'s data is stored independently.',
+        target: 'tour-month-nav', position: 'bottom'
+      },
+      {
+        title: 'Add Shifts to a Day',
+        text: 'Click any day cell to open the Day Editor. Pick a shift template (which pre-fills the times) or set custom times, then check off which members to assign. Members already on an overlapping shift that day are shown as busy.',
+        target: 'tour-days-grid', position: 'top'
+      },
+      {
+        title: 'Copy Shifts Quickly',
+        text: 'Right-click any day cell to copy all its shifts forward. "Copy to next day" duplicates them by one day; "Copy to next week" copies to the same weekday next week — great for building a repeating schedule fast.',
+        target: 'tour-days-grid', position: 'top'
+      },
+      {
+        title: '👁 Appointment Overlay',
+        text: 'Click Appointments to switch the entire calendar into appointment mode. Click any day to record a member\'s unavailability — doctor appointments, PTO, training. The calendar detects conflicts with their scheduled shifts automatically.',
+        target: 'tour-appt-btn', position: 'bottom'
+      },
+      {
+        title: '⚠ Conflicts Dashboard',
+        text: 'When a member has an appointment that overlaps a shift, the ⚠ badge shows the conflict count. Click it to open the Conflicts panel — it lists every conflict this month and offers a swap dropdown showing available same-role members who are free.',
+        target: 'tour-conflicts-btn', position: 'bottom'
+      },
+      {
+        title: 'Member Schedule View',
+        text: 'Click any member\'s name chip inside a shift bar to see their full monthly schedule — a read-only list of every shift they\'re assigned to this month, including dates, times, and template names.',
+        target: 'tour-days-grid', position: 'top'
+      },
+      {
+        title: 'Coverage Summary',
+        text: 'The footer tracks how many days each shift template is covered this month (e.g. Morning: 18/30). Green means fully covered; amber means there are days with no one assigned to that shift.',
+        target: 'tour-coverage-footer', position: 'top'
+      },
+      {
+        title: '🖨 Print the Calendar',
+        text: 'Click the print button to produce a full-screen landscape printout of the calendar — shift bar colors preserved, all controls hidden. Great for posting on a notice board or sharing offline.',
+        target: 'tour-print-btn', position: 'bottom'
+      },
+      {
+        title: 'You\'re all set! 🗓',
+        text: 'Your schedule saves automatically to this browser. There\'s nothing to install or upload — just open index.html and start scheduling. Click the ? Tour button any time to revisit this walkthrough.',
+        target: null, position: 'center'
+      }
+    ];
+
+    let _tourStep = -1;
+    let _tourSpotlight = null;
+    let _tourCard = null;
+
+    function startTour() {
+      closeModal();
+      _tourStep = 0;
+      _renderTourStep();
+    }
+
+    function _renderTourStep() {
+      _clearTourElements();
+      const step = TOUR_STEPS[_tourStep];
+      if (!step) { endTour(); return; }
+
+      // Spotlight
+      const target = step.target ? document.getElementById(step.target) : null;
+      if (target) {
+        const r = target.getBoundingClientRect();
+        const pad = 6;
+        _tourSpotlight = document.createElement('div');
+        _tourSpotlight.className = 'tour-spotlight';
+        _tourSpotlight.style.top    = (r.top    - pad) + 'px';
+        _tourSpotlight.style.left   = (r.left   - pad) + 'px';
+        _tourSpotlight.style.width  = (r.width  + pad * 2) + 'px';
+        _tourSpotlight.style.height = (r.height + pad * 2) + 'px';
+        document.body.appendChild(_tourSpotlight);
+      } else {
+        // Dim whole screen without a spotlight hole
+        _tourSpotlight = document.createElement('div');
+        _tourSpotlight.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:10001;pointer-events:none;';
+        document.body.appendChild(_tourSpotlight);
+      }
+
+      // Card
+      _tourCard = document.createElement('div');
+      _tourCard.className = 'tour-card';
+
+      const dots = document.createElement('div');
+      dots.className = 'tour-dots';
+      TOUR_STEPS.forEach((_, i) => {
+        const d = document.createElement('div');
+        d.className = 'tour-dot' + (i === _tourStep ? ' active' : '');
+        dots.appendChild(d);
+      });
+
+      const h3 = document.createElement('h3');
+      h3.textContent = step.title;
+
+      const p = document.createElement('p');
+      p.textContent = step.text;
+
+      const controls = document.createElement('div');
+      controls.className = 'tour-controls';
+
+      const stepCount = document.createElement('span');
+      stepCount.className = 'step-count';
+      stepCount.textContent = `${_tourStep + 1} / ${TOUR_STEPS.length}`;
+
+      if (_tourStep > 0) {
+        const back = document.createElement('button');
+        back.className = 'btn';
+        back.textContent = '← Back';
+        back.onclick = () => { _tourStep--; _renderTourStep(); };
+        controls.appendChild(stepCount);
+        controls.appendChild(back);
+      } else {
+        controls.appendChild(stepCount);
+      }
+
+      const isLast = _tourStep === TOUR_STEPS.length - 1;
+      const next = document.createElement('button');
+      next.className = 'btn btn-primary';
+      next.textContent = isLast ? 'Done' : 'Next →';
+      next.onclick = () => { if (isLast) endTour(); else { _tourStep++; _renderTourStep(); } };
+
+      const skip = document.createElement('button');
+      skip.className = 'btn';
+      skip.style.color = 'var(--text-muted)';
+      skip.textContent = 'Skip';
+      skip.onclick = endTour;
+
+      controls.appendChild(next);
+      if (!isLast) controls.appendChild(skip);
+
+      _tourCard.appendChild(dots);
+      _tourCard.appendChild(h3);
+      _tourCard.appendChild(p);
+      _tourCard.appendChild(controls);
+      document.body.appendChild(_tourCard);
+      _positionTourCard(target, step.position);
+    }
+
+    function _positionTourCard(target, position) {
+      const cw = _tourCard.offsetWidth, ch = _tourCard.offsetHeight;
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const margin = 14;
+      let top, left;
+
+      if (!target || position === 'center') {
+        top  = (vh - ch) / 2;
+        left = (vw - cw) / 2;
+      } else {
+        const r = target.getBoundingClientRect();
+        if (position === 'bottom') {
+          top  = r.bottom + margin;
+          left = r.left + (r.width - cw) / 2;
+        } else if (position === 'top') {
+          top  = r.top - ch - margin;
+          left = r.left + (r.width - cw) / 2;
+        } else if (position === 'right') {
+          top  = r.top + (r.height - ch) / 2;
+          left = r.right + margin;
+        } else {
+          top  = r.top + (r.height - ch) / 2;
+          left = r.left - cw - margin;
+        }
+        // Clamp to viewport
+        top  = Math.max(margin, Math.min(top,  vh - ch - margin));
+        left = Math.max(margin, Math.min(left, vw - cw - margin));
+      }
+      _tourCard.style.top  = top  + 'px';
+      _tourCard.style.left = left + 'px';
+    }
+
+    function _clearTourElements() {
+      if (_tourSpotlight) { _tourSpotlight.remove(); _tourSpotlight = null; }
+      if (_tourCard)      { _tourCard.remove();      _tourCard = null; }
+    }
+
+    function endTour() {
+      _clearTourElements();
+      _tourStep = -1;
+    }
+
+    // Allow Escape to exit tour
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && _tourStep >= 0) endTour();
+    }, true);
+    </script>
 </body>
 </html>

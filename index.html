@@ -294,6 +294,52 @@
       });
     }
 
+    function exportForMigration() {
+      const st = state;
+      const payload = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        roles: (st.roles || []).map(r => ({ id: r.id, name: r.name, color: r.color })),
+        members: (st.members || []).map(m => ({ id: m.id, name: m.name, color: m.color, roleId: m.roleId ?? null })),
+        shiftTemplates: (st.shiftTemplates || []).map(t => ({
+          id: t.id, name: t.name, startTime: t.startTime, endTime: t.endTime,
+        })),
+        schedule: Object.fromEntries(
+          Object.entries(st.schedule || {}).map(([date, shifts]) => [
+            date,
+            (shifts || []).map(s => ({
+              id: s.id,
+              templateId: s.templateId ?? null,
+              startTime: s.startTime,
+              endTime: s.endTime,
+              isAdHoc: s.isAdHoc ?? false,
+              memberIds: s.memberIds || [],
+            })),
+          ])
+        ),
+        appointments: Object.fromEntries(
+          Object.entries(st.appointments || {}).map(([memberId, appts]) => [
+            memberId,
+            (appts || []).map(a => ({
+              id: a.id,
+              date: a.date,
+              startTime: a.startTime ?? null,
+              endTime: a.endTime ?? null,
+              allDay: a.allDay ?? false,
+              note: a.note,
+            })),
+          ])
+        ),
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'migration.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
     function generateId() {
       return Date.now().toString(36) + Math.random().toString(36).slice(2);
     }
@@ -528,6 +574,7 @@
           <button class="btn" onclick="toggleWorkloadPanel()" id="tour-workload-btn">📊 Workload</button>
           <button class="btn" onclick="openSettings()" id="tour-settings-btn">⚙ Settings</button>
           <button class="btn" onclick="window.print()" id="tour-print-btn">🖨</button>
+          <button class="btn" onclick="exportForMigration()" title="Export data for migration to new app">Export</button>
           <button class="btn" onclick="startTour()" id="tour-start-btn" style="border-color:var(--accent);color:var(--accent);">? Tour</button>
         </header>
         <div class="calendar-wrap">
